@@ -1,26 +1,10 @@
-;
-; RISC-V Assembler - 20th March 2020
+; RISC-V Assembler - Version 2 - 6th October 2024
 ; see http://www.ulisp.com/show?310Z
 ;
 
-; Print 16-bit number in hex
-(defun x16 (n)
-  (printhex 4 n))
-
-; Print 32-bit number in hex
-(defun x32 (n)
-  (printhex 8 n))
-
-(defun printhex (m n)
-  (princ "#x")
-  (dotimes (j m nil)
-    (let ((d (logand (ash n (* (- j m -1) 4)) #xf)))
-      (princ
-       (code-char (+ d (if (< d 10) (char-code #\0) (char-code #\W))))))))
-
 ; Extract register number
 (defun regno (sym)
-  (case sym (zero 0) (ra 1) (sp 2) (gp 3) (tp 4) (s0 8) (fp 8) (s1 9)
+  (case sym (zero 0) (ra 1) (sp 2) (gp 3) (tp 4) ((s0 fp) 8) (s1 9)
     (t (let* ((s (string sym))
               (c (char s 0))
               (n (read-from-string (subseq s 1))))
@@ -46,7 +30,7 @@
     (list (logand word #xffff) (logand (ash word -16) #xffff))))
 
 ; Errors
-(defun error* (txt) (princ "(pc=") (x16 *pc*) (princ ") ") (princ txt) (terpri))
+(defun error* (txt) (format t "(pc=#x~x) ~a~%" *pc* txt))
 
 ; Test range of immediate values
 (defun immp (x b)
@@ -61,10 +45,10 @@
 
 ; Instruction formats
 
-(defun register (funct7 rs2 rs1 funct3 rd op)
+(defun reg (funct7 rs2 rs1 funct3 rd op)
   (emit* '(7 5 5 3 5 7) funct7 (regno rs2) (regno rs1) funct3 (regno rd) op))
 
-(defun cregister (op3 op1 op2 rd op2b rs2)
+(defun creg (op3 op1 op2 rd op2b rs2)
   (cond
    ((and (cregp rd) (cregp rs2))
     (emit '(3 1 2 3 2 3 2) op3 op1 op2 (cregno rd) op2b (cregno rs2) 1))
@@ -109,7 +93,7 @@
   (cond
    ((eq rd rs1)
     (emit '(3 1 5 5 2) 4 1 (regno rd) (regno rs2) 2))
-   (t (register 0 rs2 rs1 0 rd #x33))))
+   (t (reg 0 rs2 rs1 0 rd #x33))))
 
 (defun $addi (rd rs1 imm)
   (cond
@@ -119,23 +103,11 @@
     (emit '(3 1 5 1 1 2 1 2) 3 (bits imm 9) 2 (bits imm 4) (bits imm 6) (bits imm 8 7) (bits imm 5) 1))
    (t (immed imm rs1 0 rd #x13))))
 
-(defun $addiw (rd rs1 imm)
-  (cond
-   ((and (eq rd rs1) (immp imm 5))
-    (cimm6 rd imm 1 1))
-   (t (immed imm rs1 0 rd #x1b))))
-
-(defun $addw (rd rs1 rs2)
- (cond
-  ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (cregister 4 1 3 rd 1 rs2))
-  (t (register 0 rs2 rs1 0 rd #x3b))))
-
 (defun $and (rd rs1 rs2)
   (cond
    ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (cregister 4 0 3 rd 3 rs2))
-   (t (register 0 rs2 rs1 7 rd #x33))))
+    (creg 4 0 3 rd 3 rs2))
+   (t (reg 0 rs2 rs1 7 rd #x33))))
 
 (defun $andi (rd rs1 imm)
   (cond
@@ -243,17 +215,6 @@
    ((listp lst)
     (immed imm (car lst) 4 rd 3))))
 
-(defun $ld (rd imm lst)
-  (cond
-   ; rs1 = sp
-   ((and (listp lst) (= (regno (car lst)) 2) (zerop (logand imm #xfe07)))
-    (emit '(3 1 5 2 3 2) 3 (bits imm 5) (regno rd) (bits imm 4 3) (bits imm 8 6) 2))
-   ; rs1 = general
-   ((and (listp lst) (zerop (logand imm #xff07)) (cregp (car lst)) (cregp rd))
-    (emit '(3 3 3 2 3 2) 3 (bits imm 5 3) (cregno (car lst)) (bits imm 7 6) (cregno rd) 0))
-   ((listp lst)
-    (immed imm (car lst) 3 rd 3))))
-
 (defun $lh (rd imm lst)
   (cond
    ((listp lst)
@@ -313,9 +274,6 @@
 (defun $mulhu (rd rs1 rs2)
   (muldiv rs2 rs1 3 rd #x33))
 
-(defun $mulw (rd rs1 rs2)
-  (muldiv rs2 rs1 0 rd #x3b))
-
 (defun $mv (rd rs1)
   (emit '(3 1 5 5 2) 4 0 (regno rd) (regno rs1) 2))
 
@@ -325,8 +283,8 @@
 (defun $or (rd rs1 rs2)
   (cond
    ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (cregister 4 0 3 rd 2 rs2))
-   (t (register 0 rs2 rs1 6 rd #x33))))
+    (creg 4 0 3 rd 2 rs2))
+   (t (reg 0 rs2 rs1 6 rd #x33))))
 
 (defun $ori (rd rs1 imm)
   (immed imm rs1 6 rd #x13))
@@ -337,12 +295,6 @@
 (defun $remu (rd rs1 rs2)
   (muldiv rs2 rs1 7 rd #x33))
 
-(defun $remw (rd rs1 rs2)
-  (muldiv rs2 rs1 6 rd #x3b)) 
-
-(defun $remuw (rd rs1 rs2)
-  (muldiv rs2 rs1 7 rd #x3b)) 
-
 (defun $ret ()
   ($jr 'ra))
 
@@ -351,30 +303,13 @@
    ((listp lst)
     (store imm src (car lst) 0))))
 
-(defun $sd (src imm lst)
-  (cond
-   ((listp lst)
-    (let ((base (car lst)))
-      (cond
-       ; base = sp
-       ((and (= (regno base) 2) (zerop (logand imm #xfe07)))
-        (emit '(3 3 3 5 2) 7 (bits imm 5 3) (bits imm 8 6) (regno src) 2))
-       ; base = general
-       ((and (cregp src) (cregp base))
-        (emit '(3 3 3 2 3 2) 7 (bits imm 5 3) (cregno base) (bits imm 7 6) (cregno src) 0))
-       (t (store imm src base 3)))))
-    (t (error* "Illegal 3rd arg"))))
-
-(defun $sext.w (rd rs)
-  ($addiw rd rs 0))
-
 (defun $sh (src imm lst)
   (cond
    ((listp lst)
     (store imm src (car lst) 1))))
 
 (defun $sll (rd rs1 rs2)
-  (register 0 rs2 rs1 1 rd #x33))
+  (reg 0 rs2 rs1 1 rd #x33))
 
 (defun $slli (rd rs1 imm)
   (cond
@@ -383,13 +318,13 @@
    (t (emit* '(6 6 5 3 5 7) 0 imm (regno rs1) 1 (regno rd) #x13))))
 
 (defun $sllw (rd rs1 rs2)
-  (register 0 rs2 rs1 1 rd #x3b))
+  (reg 0 rs2 rs1 1 rd #x3b))
 
 (defun $slt (rd rs1 rs2)
-  (register 0 rs2 rs1 2 rd #x33))
+  (reg 0 rs2 rs1 2 rd #x33))
 
 (defun $sra (rd rs1 rs2)
-  (register #x20 rs2 rs1 2 rd #x33))
+  (reg #x20 rs2 rs1 2 rd #x33))
 
 (defun $srai (rd rs1 imm)
   (cond
@@ -398,10 +333,10 @@
    (t (emit* '(6 6 5 3 5 7) #x10 imm (regno rs1) 5 (regno rd) #x13))))
 
 (defun $sraw (rd rs1 rs2)
-  (register #x20 rs2 rs1 5 rd #x3b))
+  (reg #x20 rs2 rs1 5 rd #x3b))
 
 (defun $srl (rd rs1 rs2)
-  (register 0 rs2 rs1 5 rd #x33))
+  (reg 0 rs2 rs1 5 rd #x33))
 
 (defun $srli (rd rs1 imm)
   (cond
@@ -410,19 +345,19 @@
    (t (emit* '(6 6 5 3 5 7) 0 imm (regno rs1) 5 (regno rd) #x13))))
 
 (defun $srlw (rd rs1 rs2)
-  (register 0 rs2 rs1 5 rd #x3b))
+  (reg 0 rs2 rs1 5 rd #x3b))
 
 (defun $sub (rd rs1 rs2)
   (cond
    ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (cregister 4 0 3 rd 0 rs2))
-   (t (register #x20 rs2 rs1 0 rd #x33))))
+    (creg 4 0 3 rd 0 rs2))
+   (t (reg #x20 rs2 rs1 0 rd #x33))))
 
 (defun $subw (rd rs2)
   (cond
    ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (cregister 4 1 3 rd 0 rs2))
-   (t (register #x20 rs2 rs1 0 rd #x3b))))
+    (creg 4 1 3 rd 0 rs2))
+   (t (reg #x20 rs2 rs1 0 rd #x3b))))
 
 (defun $sw (src imm lst)
   (cond
@@ -441,8 +376,8 @@
 (defun $xor (rd rs1 rs2)
   (cond
    ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (cregister 4 0 3 rd 1 rs2))
-   (t (register 0 rs2 rs1 4 rd #x33))))
+    (creg 4 0 3 rd 1 rs2))
+   (t (reg 0 rs2 rs1 4 rd #x33))))
 
 (defun $xori (rd rs1 imm)
   (immed imm rs1 4 rd #x13))
