@@ -1,4 +1,4 @@
-; RISC-V Assembler - Version 2 - 6th October 2024
+; RISC-V Assembler - Version 3 - 7th October 2024
 ; see http://www.ulisp.com/show?310Z
 ;
 
@@ -10,7 +10,7 @@
               (n (read-from-string (subseq s 1))))
          (case c (#\x n) (#\a (+ n 10)) (#\s (+ n 16)) (#\t (if (<= n 2) (+ n 5) (+ n 25))))))))
 
-; Short 3-bit register
+; Short 3-bit register s0, s1, a0 to a5
 (defun cregp (rd) (<= 8 (regno rd) 15))
 
 (defun cregno (sym) (logand (regno sym) #x7))
@@ -32,7 +32,7 @@
 ; Errors
 (defun error* (txt) (format t "(pc=#x~x) ~a~%" *pc* txt))
 
-; Test range of immediate values
+; Test range of immediate signed values
 (defun immp (x b)
   (<= (- (ash 1 (1- b))) x (1- (ash 1 (1- b)))))
 
@@ -131,9 +131,42 @@
       (emit '(3 1 2 3 2 2 1 2) 6 (bits off 8) (bits off 4 3) 
             (cregno rs) (bits off 7 6) (bits off 2 1) (bits off 5) 1))
      (t ($beq rs 'x0 imm)))))
+
+(defun $bge (rs1 rs2 imm12)
+  (branch imm12 rs2 rs1 5 #x63))
+
+(defun $bgeu (rs1 rs2 imm12)
+  (branch imm12 rs2 rs1 7 #x63))
+
+(defun $bgez (rs1 imm12)
+  ($bge rs1 'x0 imm12))
+
+(defun $bgt (rs1 rs2 imm12)
+  ($blt rs2 rs1 imm12))
+
+(defun $bgtu (rs1 rs2 imm12)
+  ($bltu rs2 rs1 imm12))
+
+(defun $bgtz (rs1 imm12)
+  ($blt 'x0 rs1 imm12))
     
 (defun $ble (rs1 rs2 imm12)
   ($bge rs2 rs1 imm12))
+
+(defun $bleu (rs1 rs2 imm12)
+  ($bgeu rs2 rs1 imm12))
+
+(defun $blez (rs2 imm12)
+  ($bge 'x0 rs2 imm12))
+
+(defun $blt (rs1 rs2 imm12)
+  (branch imm12 rs2 rs1 4 #x63))
+
+(defun $bltu (rs1 rs2 imm12)
+  (branch imm12 rs2 rs1 6 #x63))
+
+(defun $bltz (rs1 imm12)
+  ($blt rs1 'x0 imm12))
 
 (defun $bne (rs1 rs2 imm12)
   (branch imm12 rs2 rs1 1 #x63))
@@ -145,33 +178,6 @@
       (emit '(3 1 2 3 2 2 1 2) 7 (bits off 8) (bits off 4 3) 
             (cregno rs) (bits off 7 6) (bits off 2 1) (bits off 5) 1))
      (t ($bne rs 'x0 imm)))))
-
-(defun $bge (rs1 rs2 imm12)
-  (branch imm12 rs2 rs1 5 #x63))
-
-(defun $bgez (rs1 imm12)
-  ($bge rs1 'x0 imm12))
-
-(defun $bgtz (rs1 imm12)
-  ($blt 'x0 rs1 imm12))
-
-(defun $blt (rs1 rs2 imm12)
-  (branch imm12 rs2 rs1 4 #x63))
-
-(defun $bltu (rs1 rs2 imm12)
-  (branch imm12 rs2 rs1 6 #x63))
-
-(defun $bltz (rs1 imm12)
-  ($blt rs1 'x0 imm12))
-
-(defun $bgeu (rs1 rs2 imm12)
-  (branch imm12 rs2 rs1 7 #x63))
-
-(defun $bleu (rs1 rs2 imm12)
-  ($bgeu rs2 rs1 imm12))
-
-(defun $blez (rs1 imm12)
-  ($bge 'x0 rs1 imm12))
 
 (defun $div (rd rs1 rs2)
   (muldiv rs2 rs1 4 rd #x33)) 
@@ -205,25 +211,22 @@
 (defun $jr (rs1)
   (emit '(3 1 5 5 2) 4 0 (regno rs1) 0 2))
 
-(defun $lb (rd imm lst)
-  (cond
-   ((listp lst)
-    (immed imm (car lst) 0 rd 3))))
+; In next four, imm can be omitted and defaults to 0
+(defun $lb (rd imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (immed imm (car lst) 0 rd 3))
 
-(defun $lbu (rd imm lst)
-  (cond
-   ((listp lst)
-    (immed imm (car lst) 4 rd 3))))
+(defun $lbu (rd imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (immed imm (car lst) 4 rd 3))
 
-(defun $lh (rd imm lst)
-  (cond
-   ((listp lst)
-    (immed imm (car lst) 1 rd 3))))
+(defun $lh (rd imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (immed imm (car lst) 1 rd 3))
 
-(defun $lhu (rd imm lst)
-  (cond
-   ((listp lst)
-    (immed imm (car lst) 5 rd 3))))
+(defun $lhu (rd imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (immed imm (car lst) 5 rd 3))
 
 ; li pseudoinstruction - will load 32-bit immediates
 (defun $li (rd imm)
@@ -257,11 +260,6 @@
        (t (immed imm base 2 rd 3)))))
    (t (error* "Illegal 3rd arg"))))
 
-(defun $lwu (rd imm lst)
-  (cond
-   ((listp lst)
-    (immed imm (car lst) 6 rd 3))))
-
 (defun $mul (rd rs1 rs2)
   (muldiv rs2 rs1 0 rd #x33))
 
@@ -277,8 +275,14 @@
 (defun $mv (rd rs1)
   (emit '(3 1 5 5 2) 4 0 (regno rd) (regno rs1) 2))
 
+(defun $neg (rd rs2)
+  ($sub rd 'x0 rs2))
+
 (defun $nop ()
   ($addi 'x0 'x0 0))
+
+(defun $not (rd rs1)
+  ($xori rd rs1 -1))
 
 (defun $or (rd rs1 rs2)
   (cond
@@ -298,15 +302,20 @@
 (defun $ret ()
   ($jr 'ra))
 
-(defun $sb (src imm lst)
-  (cond
-   ((listp lst)
-    (store imm src (car lst) 0))))
+; In $sb, $sh, and $sw, imm can be omitted and defaults to 0
+(defun $sb (src imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (store imm src (car lst) 0))
 
-(defun $sh (src imm lst)
-  (cond
-   ((listp lst)
-    (store imm src (car lst) 1))))
+(defun $seqz (rd rs1)
+  ($sltiu rd rs1 1))
+
+(defun $sgtz (rd rs2)
+  ($slt rd 'x0 rs2))
+
+(defun $sh (src imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (store imm src (car lst) 1))
 
 (defun $sll (rd rs1 rs2)
   (reg 0 rs2 rs1 1 rd #x33))
@@ -317,11 +326,23 @@
     (cimm6 rd imm 0 2))
    (t (emit* '(6 6 5 3 5 7) 0 imm (regno rs1) 1 (regno rd) #x13))))
 
-(defun $sllw (rd rs1 rs2)
-  (reg 0 rs2 rs1 1 rd #x3b))
-
 (defun $slt (rd rs1 rs2)
   (reg 0 rs2 rs1 2 rd #x33))
+
+(defun $slti (rd rs1 imm)
+  (immed imm rs1 2 rd #x13))
+
+(defun $sltiu (rd rs1 imm)
+  (immed imm rs1 3 rd #x13))
+
+(defun $sltu (rd rs1 rs2)
+  (reg 0 rs2 rs1 3 rd #x33))
+
+(defun $sltz (rd rs1)
+  ($slt rd rs1 'x0))
+
+(defun $snez (rd rs2)
+  ($sltu rd 'x0 rs2))
 
 (defun $sra (rd rs1 rs2)
   (reg #x20 rs2 rs1 2 rd #x33))
@@ -332,9 +353,6 @@
     (cimm6* rd imm 4 1 1))
    (t (emit* '(6 6 5 3 5 7) #x10 imm (regno rs1) 5 (regno rd) #x13))))
 
-(defun $sraw (rd rs1 rs2)
-  (reg #x20 rs2 rs1 5 rd #x3b))
-
 (defun $srl (rd rs1 rs2)
   (reg 0 rs2 rs1 5 rd #x33))
 
@@ -344,34 +362,23 @@
     (cimm6* rd imm 4 0 1))
    (t (emit* '(6 6 5 3 5 7) 0 imm (regno rs1) 5 (regno rd) #x13))))
 
-(defun $srlw (rd rs1 rs2)
-  (reg 0 rs2 rs1 5 rd #x3b))
-
 (defun $sub (rd rs1 rs2)
   (cond
    ((and (eq rd rs1) (cregp rd) (cregp rs2))
     (creg 4 0 3 rd 0 rs2))
    (t (reg #x20 rs2 rs1 0 rd #x33))))
 
-(defun $subw (rd rs2)
-  (cond
-   ((and (eq rd rs1) (cregp rd) (cregp rs2))
-    (creg 4 1 3 rd 0 rs2))
-   (t (reg #x20 rs2 rs1 0 rd #x3b))))
-
-(defun $sw (src imm lst)
-  (cond
-   ((listp lst)
-    (let ((base (car lst)))
-      (cond
-       ; base = sp
-       ((and (= (regno base) 2))
-        (emit '(3 4 2 5 2) 6 (bits imm 5 2) (bits imm 7 6) (regno src) 2))
-       ; base = general
-       ((and (cregp src) (cregp base))
-        (emit '(3 3 3 1 1 3 2) 6 (bits imm 5 3) (cregno base) (bits imm 2) (bits imm 6) (cregno src) 0))
-       (t (store imm src base 2)))))
-   (t (error* "Illegal 3rd arg"))))
+(defun $sw (src imm &optional lst)
+  (unless lst (setq lst imm imm 0))
+  (let ((base (car lst)))
+    (cond
+     ; base = sp
+     ((and (= (regno base) 2))
+      (emit '(3 4 2 5 2) 6 (bits imm 5 2) (bits imm 7 6) (regno src) 2))
+     ; base = general
+     ((and (cregp src) (cregp base))
+      (emit '(3 3 3 1 1 3 2) 6 (bits imm 5 3) (cregno base) (bits imm 2) (bits imm 6) (cregno src) 0))
+     (t (store imm src base 2)))))
 
 (defun $xor (rd rs1 rs2)
   (cond
