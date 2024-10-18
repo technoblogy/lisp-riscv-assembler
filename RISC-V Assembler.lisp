@@ -1,4 +1,4 @@
-; RISC-V Assembler - Version 3 - 7th October 2024
+; RISC-V Assembler - Version 4 - 18th October 2024
 ; see http://www.ulisp.com/show?310Z
 ;
 
@@ -25,7 +25,7 @@
     word))
 
 ; 32-bit emit
-(defun emit* (bits &rest args)
+(defun emit32 (bits &rest args)
   (let ((word (apply #'emit bits args)))
     (list (logand word #xffff) (logand (ash word -16) #xffff))))
 
@@ -46,7 +46,7 @@
 ; Instruction formats
 
 (defun reg (funct7 rs2 rs1 funct3 rd op)
-  (emit* '(7 5 5 3 5 7) funct7 (regno rs2) (regno rs1) funct3 (regno rd) op))
+  (emit32 '(7 5 5 3 5 7) funct7 (regno rs2) (regno rs1) funct3 (regno rd) op))
 
 (defun creg (op3 op1 op2 rd op2b rs2)
   (cond
@@ -57,27 +57,27 @@
 (defun immed (imm12 rs1 funct3 rd op)
   (cond
    ((immp imm12 12)
-    (emit* '(12 5 3 5 7) (logand imm12 #xfff) (regno rs1) funct3 (regno rd) op))
+    (emit32 '(12 5 3 5 7) (logand imm12 #xfff) (regno rs1) funct3 (regno rd) op))
    (t
     (error* "Immediate value out of range"))))
 
 (defun cimmed (imm12 rs1 funct3 rd op)
-  (emit* '(12 5 3 5 7) imm12 (regno rs1) funct3 (regno rd) op))
+  (emit32 '(12 5 3 5 7) imm12 (regno rs1) funct3 (regno rd) op))
 
 (defun branch (imm12 rs2 rs1 funct3 funct7)
   (let ((off (offset imm12)))
-    (emit* '(1 6 5 5 3 4 1 7) 
+    (emit32 '(1 6 5 5 3 4 1 7) 
            (bits off 12) (bits off 10 5) (regno rs2) 
            (regno rs1) funct3 (bits off 4 1) (bits off 11) funct7)))
 
 (defun jump (imm20 imm10-1 imm11 imm19-12 rd op)
-  (emit* '(1 10 1 8 5 7) imm20 imm10-1 imm11 imm19-12 rd op))
+  (emit32 '(1 10 1 8 5 7) imm20 imm10-1 imm11 imm19-12 rd op))
 
 (defun muldiv (rs2 rs1 funct3 rd funct7)
-  (emit* '(7 5 5 3 5 7) 1 (regno rs2) (regno rs1) funct3 (regno rd) funct7))
+  (emit32 '(7 5 5 3 5 7) 1 (regno rs2) (regno rs1) funct3 (regno rd) funct7))
 
 (defun store (imm src base op)
-  (emit* '(7 5 5 3 5 7) (bits imm 11 5) (regno src) (regno base) op (bits imm 4 0) #x23))
+  (emit32 '(7 5 5 3 5 7) (bits imm 11 5) (regno src) (regno base) op (bits imm 4 0) #x23))
 
 (defun cimm6 (rd imm op1 op2)
   (emit '(3 1 5 5 2) op1 (bits imm 5) (regno rd) (bits imm 4 0) op2))
@@ -118,7 +118,7 @@
 (defun $auipc (rd imm)
   (cond
    ((zerop (logand imm #xfff))
-    (emit* '(20 5 7) (bits imm 31 12) (regno rd) #x17))
+    (emit32 '(20 5 7) (bits imm 31 12) (regno rd) #x17))
    (t (error* "auipc no good"))))
 
 (defun $beq (rs1 rs2 imm12)
@@ -191,7 +191,7 @@
 (defun $divuw (rd rs1 rs2)
   (muldiv rs2 rs1 5 rd #x3b))
 
-(defun $fence () (emit* '(16 16) #x0ff0 #x000f))
+(defun $fence () (emit32 '(16 16) #x0ff0 #x000f))
 
 (defun $j (label)
   (let ((off (offset label)))
@@ -202,11 +202,11 @@
 (defun $jal (rd &optional label)
   (when (null label) (setq label rd rd 'ra))
   (let ((off (offset label)))
-    (emit* '(1 10 1 8 5 7) (bits off 20) (bits off 10 1) (bits off 11) (bits off 19 12) (regno rd) #x6f)))
+    (emit32 '(1 10 1 8 5 7) (bits off 20) (bits off 10 1) (bits off 11) (bits off 19 12) (regno rd) #x6f)))
 
 (defun $jalr (label lst)
   (let ((off (+ (offset label) 4)))
-    (emit* '(12 5 3 5 7) (bits off 11 0) (regno (car lst)) 0 (regno (car lst)) #x67)))
+    (emit32 '(12 5 3 5 7) (bits off 11 0) (regno (car lst)) 0 (regno (car lst)) #x67)))
 
 (defun $jr (rs1)
   (emit '(3 1 5 5 2) 4 0 (regno rs1) 0 2))
@@ -231,19 +231,23 @@
 ; li pseudoinstruction - will load 32-bit immediates
 (defun $li (rd imm)
   (cond
-   ((immp imm 6)
+   ((immp imm 6) ; 16 bit
     (cimm6 rd imm 2 1))
-   (t (let ((imm12 (logand imm #x00000fff))
-            (imm20 (logand imm #xfffff000)))
+   ((immp imm 12) ; 32 bit
+    ($addi rd 'x0 imm))
+   (t (let ((imm12 (logand imm #x00000fff)) ; 64 bit
+            (imm20 (logand (ash imm -12) #xfffff)))
         (append
          ($lui rd (if (= (logand imm12 #x800) #x800) (+ imm20 #x1000) imm20))
          ; $addi
-         (emit* '(12 5 3 5 7) imm12 (regno rd) 0 (regno rd) #x13))))))
+         (emit32 '(12 5 3 5 7) imm12 (regno rd) 0 (regno rd) #x13))))))
 
 (defun $lui (rd imm)
   (cond
-   ((zerop (logand imm #xfff))
-    (emit* '(20 5 7) (bits imm 31 12) (regno rd) #x37))
+   ((and (immp imm 6) (/= imm 0) (/= (regno rd) 0) (/= (regno rd) 2)) ; 16 bit
+    (cimm6 rd imm 3 1))
+   (t
+    (emit32 '(20 5 7) imm (regno rd) #x37))
    (t (error* "lui no good"))))
 
 (defun $lw (rd imm lst)
@@ -324,7 +328,7 @@
   (cond
    ((and (eq rd rs1))
     (cimm6 rd imm 0 2))
-   (t (emit* '(6 6 5 3 5 7) 0 imm (regno rs1) 1 (regno rd) #x13))))
+   (t (emit32 '(6 6 5 3 5 7) 0 imm (regno rs1) 1 (regno rd) #x13))))
 
 (defun $slt (rd rs1 rs2)
   (reg 0 rs2 rs1 2 rd #x33))
@@ -351,7 +355,7 @@
   (cond
    ((and (eq rd rs1) (cregp rd))
     (cimm6* rd imm 4 1 1))
-   (t (emit* '(6 6 5 3 5 7) #x10 imm (regno rs1) 5 (regno rd) #x13))))
+   (t (emit32 '(6 6 5 3 5 7) #x10 imm (regno rs1) 5 (regno rd) #x13))))
 
 (defun $srl (rd rs1 rs2)
   (reg 0 rs2 rs1 5 rd #x33))
@@ -360,7 +364,7 @@
   (cond
    ((and (eq rd rs1) (cregp rd))
     (cimm6* rd imm 4 0 1))
-   (t (emit* '(6 6 5 3 5 7) 0 imm (regno rs1) 5 (regno rd) #x13))))
+   (t (emit32 '(6 6 5 3 5 7) 0 imm (regno rs1) 5 (regno rd) #x13))))
 
 (defun $sub (rd rs1 rs2)
   (cond
